@@ -15,9 +15,6 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 
-// Database Setup
-//            postgres protocol
-//                            my uname/pw           domain : port/database
 const client = new pg.Client(process.env.DATABASE_URL);
 client.connect();
 
@@ -67,7 +64,6 @@ function searchToLatLong(query) {
   let values = [ query ];
   return client.query(sqlStatement, values)
     .then( (data) => {
-      console.log('we made it');
       console.log(data);
       // if data in db, use data from db and send result
       if(data.rowCount > 0) {
