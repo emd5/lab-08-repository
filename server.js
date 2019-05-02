@@ -28,8 +28,10 @@ app.get('/location', (request, response) => {
     .catch(error => handleError(error, response));
 });
 
-app.get('/weather', getWeather);
-app.get('/events', getEvents);
+// app.get('/weather', getWeather);
+
+// app.get('/events', getEvents);
+
 
 
 // Make sure the server is listening for requests
@@ -42,11 +44,11 @@ function handleError(err, res) {
 }
 
 // Models
-function Location(query, res) {
-  this.search_query = query;
-  this.formatted_query = res.body.results[0].formatted_address;
-  this.latitude = res.body.results[0].geometry.location.lat;
-  this.longitude = res.body.results[0].geometry.location.lng;
+function Location(loc) {
+  this.search_query = loc.body.results[0].address_components[0].long_name;
+  this.formatted_query = loc.body.results[0].formatted_address;
+  this.latitude = loc.body.results[0].geometry.location.lat;
+  this.longitude = loc.body.results[0].geometry.location.lng;
 }
 
 function Weather(day) {
@@ -67,8 +69,6 @@ function searchToLatLong(query) {
   let values = [ query ];
   return client.query(sqlStatement, values)
     .then( (data) => {
-      console.log('we made it');
-      console.log(data);
       // if data in db, use data from db and send result
       if(data.rowCount > 0) {
         // use data from db and send result
@@ -91,33 +91,75 @@ function searchToLatLong(query) {
     });
 }
 
+// Weather check function
+app.get('/weather', (request, response) => {
+  try {
+    databaseCheck(request, response, 'weather');
+  } catch(error) {
+    handleError(error);
+  }
+});
+// Event check function
+app.get('/events', (request, response) => {
+  try {
+    databaseCheck(request, response, 'event');
+  } catch(error) {
+    handleError(error);
+  }
+});
+
+const databaseCheck = (request, response, tableName) => {
+  let sqlQueryCheck = `SELECT * FROM ${tableName} WHERE search_query = $1;`;
+  let values = [request.query.data.search_query]; // User input: ex "Tacoma";
+  client.query(sqlQueryCheck, values)
+    .then((data) => {
+      if(data.rowCount > 0) {
+        return response.send(data.rows);
+      } else if (
+        tableName === 'weather') {
+        return getWeather(request);  
+      } else if (
+        tableName === 'events') {
+        return getEvents(request);
+      }
+    })
+    .catch((error) => {
+      handleError(error);
+    });
+};
+
 function getWeather(request, response) {
-  const url = `https://api.darksky.net/forecast/${process.env.WEATHER_API_KEY}/${request.query.data.latitude},${request.query.data.longitude}`;
-
-  superagent.get(url)
+  const getWeatherUrl = `https://api.darksky.net/forecast/${process.env.WEATHER_API_KEY}/${request.query.data.latitude},${request.query.data.longitude}`;
+  superagent.get(getWeatherUrl)
     .then(result => {
-      const weatherSummaries = result.body.daily.data.map(day => {
-        return new Weather(day);
+      let newWeatherArr = result.body.daily.data.map(element => {
+        return new Weather(element);
       });
-
-      response.send(weatherSummaries);
+      newWeatherArr.forEach((item) => {
+        let insertStatement = `INSERT INTO weather (forecast, time, search_query) VALUES ($1, $2, $3);`;
+        let insertValues = [item.forecast, item.time, request.query.data.search_query];
+        client.query(insertStatement, insertValues);
+      });
+      return newWeatherArr;
     })
     .catch(error => handleError(error, response));
 }
 
-
 function getEvents(request, response) {
-  const url = `https://www.eventbriteapi.com/v3/events/search?location.address=${request.query.data.formatted_query}`;
-
-  superagent.get(url)
+  const getEventsUrl = `https://www.eventbriteapi.com/v3/events/search?location.address=${request.query.data.formatted_query}`;
+  superagent.get(getEventsUrl)
     .set('Authorization', `Bearer ${process.env.EVENTBRITE_API_KEY}`)
     .then(result => {
-      const events = result.body.events.map(eventData => {
-        const event = new Event(eventData);
-        return event;
+      let eventArr = result.body.events.map(element => {
+        return new Event(element);
       });
-
-      response.send(events);
+      eventArr.forEach((item) => {
+        console.log('item is:', item.link);
+        let insertStatement = `INSERT INTO event (link, name, event_date, summary, search_query) VALUES ($1, $2, $3, $4, $5);`;
+        let insertValues = [item.link, item.name, item.event_date, item.summary, request.query.data.search_query];
+        client.query(insertStatement, insertValues); // add to client req.body
+      })
+      return eventArr;
     })
     .catch(error => handleError(error, response));
 }
